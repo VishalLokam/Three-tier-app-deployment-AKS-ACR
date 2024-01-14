@@ -1,108 +1,116 @@
-# #TWSThreeTierAppChallenge
+# Overview  
+This repository contains the code for `#TWSThreeTierAppChallenge` by [Train with Shubham](https://www.linkedin.com/posts/shubhamlondhe1996_twsthreetierappchallenge-trainwithshubham-activity-7151064404992679936-jsdZ?utm_source=share&utm_medium=member_desktop) with a twist. In this challenge we are going to create Kubernetes cluster on Microsoft Azure using [Azure Kubernetes Service](https://azure.microsoft.com/en-in/products/kubernetes-service). We are also going to create a private container registry using [Azure Container Registry](https://azure.microsoft.com/en-in/products/container-registry) and kubernetes cluster is exposed to the internet with the help of [Traefik](https://traefik.io/traefik/) ingress controller.
 
-## Overview
-This repository hosts the `#TWSThreeTierAppChallenge` for the TWS community. 
-The challenge involves deploying a Three-Tier Web Application using ReactJS, NodeJS, and MongoDB, with deployment on AWS EKS. Participants are encouraged to deploy the application, add creative enhancements, and submit a Pull Request (PR). Merged PRs will earn exciting prizes!
 
-**Get The Challenge here**
+# Installations required on the development environment
+- Microsoft Azure account
+- Azure cli
+- terraform 
+- kubectl
+- helm
 
-[![YouTube Video](https://img.youtube.com/vi/tvWQRTbMS1g/maxresdefault.jpg)](https://youtu.be/tvWQRTbMS1g?si=eki-boMemxr4PU7-)
+# Steps
+1. Login into the Azure account using azure cli
+    ```
+    az login
+    ```
+2. Create a new service principal  
 
-## Prerequisites
-- Basic knowledge of Docker, and AWS services.
-- An AWS account with necessary permissions.
+    ```
+    az ad sp create-for-rbac --skip-assignment
+    ```
 
-## Challenge Steps
+    Copy and save the information returned after executing the command successfully. Information will look something like:
+    ```
+    {
+        "appId": "<app_if>",
+        "displayName": "<display_name>",
+        "password": "<password>",
+        "tenant": "<tenant>"
+    }
+    ```
 
-### Step 1: IAM Configuration
-- Create a user `eks-admin` with `AdministratorAccess`.
-- Generate Security Credentials: Access Key and Secret Access Key.
+3. Get the service principal id(object id) using azure cli
+    ```
+    az ad sp show --id <appId_from_above_step> --query "id"
+    ```
+    Note the retured principal id as well.
 
-### Step 2: EC2 Setup
-- Launch an Ubuntu instance in your favourite region (eg. region `us-west-2`).
-- SSH into the instance from your local machine.
+4. In the terraform folder create a new file `terraform.tfvars` and paste the below code to initialise the variable values:
+    ```
+    resource_group_name = "tws_deployment_RG"
+    location            = "centralindia"
+    cluster_name        = "my-aks-cluster"
+    kubernetes_version  = "1.26.10"
+    system_node_count   = 3
+    acr_name            = "twsChallengeACRVishal"
+    appId               = "<appId_from_step_2>"
+    principalid         = "<principalId_from_step_3>"
+    password            = "<password_from_step_2>"
+    dns_prefix          = "aks-dns-prefix-k8s"
+    ```
+    In `appId`, `principalid`, `password` insert data from the previous steps
 
-### Step 3: Install AWS CLI v2
-``` shell
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-sudo apt install unzip
-unzip awscliv2.zip
-sudo ./aws/install -i /usr/local/aws-cli -b /usr/local/bin --update
-aws configure
-```
+5. Run the terraform commands to create a new AKS cluster and ACR.
+    ```
+    terraform init
+    terraform fmt
+    terraform plan
+    # If the plan looks fine then go ahead
+    terraform apply -auto-approve
+    ```
+    Make note of the outputs after all the resources are created. Especially `acr_login_server`, `acr_username` and `acr_password`.  
+    To see `acr_password`, use the command 
+    ```
+    terraform output acr_password
+    ```
 
-### Step 4: Install Docker
-``` shell
-sudo apt-get update
-sudo apt install docker.io
-docker ps
-sudo chown $USER /var/run/docker.sock
-```
+6. After provisioning, Retrieve access credentials and automatically configure `kubectl`
+    ```
+    az aks get-credentials --resource-group $(terraform output -raw resource_group_name) --name $(terraform output -raw kubernetes_cluster_name)
+    ```
 
-### Step 5: Install kubectl
-``` shell
-curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.19.6/2021-01-05/bin/linux/amd64/kubectl
-chmod +x ./kubectl
-sudo mv ./kubectl /usr/local/bin
-kubectl version --short --client
-```
+7. Login into the private container registry hosted on Azure
+    ```
+    docker login <acr_login_server>
+    ```
+    Change `<acr_login_server>` to your login server.  
+    Provide the `acr_username` and `acr_password` when prompted.
 
-### Step 6: Install eksctl
-``` shell
-curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-sudo mv /tmp/eksctl /usr/local/bin
-eksctl version
-```
+8. Build and push docker images for `backend` and `frontend`.
+    ```
+    # build and push backend
+    cd backend
+    docker image build -t <acr_login_server>/backend:v1 ./
+    docker image push <acr_login_server>/backend:v1
 
-### Step 7: Setup EKS Cluster
-``` shell
-eksctl create cluster --name three-tier-cluster --region us-west-2 --node-type t2.medium --nodes-min 2 --nodes-max 2
-aws eks update-kubeconfig --region us-west-2 --name three-tier-cluster
-kubectl get nodes
-```
 
-### Step 8: Run Manifests
-``` shell
-kubectl create namespace workshop
-kubectl apply -f .
-kubectl delete -f .
-```
+    # build and push frontend  
+    cd ../frontend
+    docker image build -t <acr_login_server>/frontend:v1 ./
+    docker image push <acr_login_server>/frontend:v1
+    ```
+    Change the `acr_login_server` to your login server name
 
-### Step 9: Install AWS Load Balancer
-``` shell
-curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.5.4/docs/install/iam_policy.json
-aws iam create-policy --policy-name AWSLoadBalancerControllerIAMPolicy --policy-document file://iam_policy.json
-eksctl utils associate-iam-oidc-provider --region=us-west-2 --cluster=three-tier-cluster --approve
-eksctl create iamserviceaccount --cluster=three-tier-cluster --namespace=kube-system --name=aws-load-balancer-controller --role-name AmazonEKSLoadBalancerControllerRole --attach-policy-arn=arn:aws:iam::626072240565:policy/AWSLoadBalancerControllerIAMPolicy --approve --region=us-west-2
-```
+9. Change the env. value in `k8s_manifests/frontend-deployment.yaml` to `http://app.20.207.122.241.nip.io/api/tasks`   
+and host in  `traefik-ingress-controller/ingress.yaml` to `app.<public_ip_kubernets_lb>.nip.io`.  
+If you own a custom domain, then create a subdomain and change `app.20.207.122.241.nip.io` to your sub domain name.  
+Learn more about [nip.io](https://nip.io/)
 
-### Step 10: Deploy AWS Load Balancer Controller
-``` shell
-sudo snap install helm --classic
-helm repo add eks https://aws.github.io/eks-charts
-helm repo update eks
-helm install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system --set clusterName=my-cluster --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller
-kubectl get deployment -n kube-system aws-load-balancer-controller
-kubectl apply -f full_stack_lb.yaml
-```
 
-### Cleanup
-- To delete the EKS cluster:
-``` shell
-eksctl delete cluster --name three-tier-cluster --region us-west-2
-```
+10. Run the K8S manifests to create kubernetes deployment and services.
+    ```
+    kubectl create workspace workshop
+    kubectl apply -f <all_the_yaml_files> -n workshop
+    ```
+    In `<all_the_yaml_files>`, provide all the yaml files from the `k8s_manifests` folder and `traefik-ingress-controller` folder.
 
-## Contribution Guidelines
-- Fork the repository and create your feature branch.
-- Deploy the application, adding your creative enhancements.
-- Ensure your code adheres to the project's style and contribution guidelines.
-- Submit a Pull Request with a detailed description of your changes.
+11. Install [Traefik](https://traefik.io/traefik/) using helm.
+    ```
+    helm repo add traefik https://helm.traefik.io/traefik
+    helm repo update
+    kubectl create namespace traefik
+    helm install traefik traefik/traefik -n traefik
+    ```
 
-## Rewards
-- Successful PR merges will be eligible for exciting prizes!
-
-## Support
-For any queries or issues, please open an issue in the repository.
-
----
-Happy Learning! 🚀👨‍💻👩‍💻
+12. Application is deployed on the AKS cluster. To access it run `http://app.20.207.122.241.nip.io/` or the sub domain on your custom domain provided during step 9
