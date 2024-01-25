@@ -92,9 +92,9 @@ This repository contains the code for `#TWSThreeTierAppChallenge` by [Train with
     ```
     Change the `acr_login_server` to your login server name
 
-9. Change the env. value in `k8s_manifests/frontend-deployment.yaml` to `http://app.20.207.122.241.nip.io/api/tasks`   
+9. Change the env. value in `k8s_manifests/frontend-deployment.yaml` to `http://app.<public_ip_kubernets_lb>.nip.io/api/tasks`   
 and host in  `traefik-ingress-controller/ingress.yaml` to `app.<public_ip_kubernets_lb>.nip.io`.  
-If you own a custom domain, then create a subdomain and change `app.20.207.122.241.nip.io` to your sub domain name.  
+If you own a custom domain, then create a subdomain and change `app.<public_ip_kubernets_lb>.nip.io` to your sub domain name.  
 Learn more about [nip.io](https://nip.io/)
 
 
@@ -113,4 +113,4 @@ Learn more about [nip.io](https://nip.io/)
     helm install traefik traefik/traefik -n traefik
     ```
 
-12. Application is deployed on the AKS cluster. To access it run `http://app.20.207.122.241.nip.io/` or the sub domain on your custom domain provided during step 9
+12. Application is deployed on the AKS cluster. To access it run `http://app.<public_ip_kubernets_lb>.nip.io/` or the sub domain on your custom domain provided during step 9
